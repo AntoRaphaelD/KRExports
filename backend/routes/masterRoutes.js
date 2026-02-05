@@ -1,88 +1,76 @@
 const express = require('express');
 const router = express.Router();
+const ctrl = require('../controllers/masterController');
 
-const controllers = require('../controllers/masterController');
+const validate = (fn) => {
+    if (typeof fn !== 'function') throw new Error(`Route handler is not a function! Check masterController exports.`);
+    return fn;
+};
 
+// Masters
+router.post('/accounts', validate(ctrl.account.create));
+router.get('/accounts', validate(ctrl.account.getAll));
+router.put('/accounts/:id', validate(ctrl.account.update));
+router.delete('/accounts/:id', validate(ctrl.account.delete));
 
+router.post('/brokers', validate(ctrl.broker.create));
+router.get('/brokers', validate(ctrl.broker.getAll));
+router.put('/brokers/:id', validate(ctrl.broker.update));
+router.delete('/brokers/:id', validate(ctrl.broker.delete));
 
-/**
- * ==========================================
- * 1. MASTER ROUTES (Images 1-5, 7, 8, 12)
- * ==========================================
- */
+router.post('/products', validate(ctrl.product.create));
+router.get('/products', validate(ctrl.product.getAll));
+router.put('/products/:id', validate(ctrl.product.update));
+router.delete('/products/:id', validate(ctrl.product.delete));
 
-// ACCOUNTS MASTER (Images 7 & 8)
-router.post('/accounts', controllers.accountController.create);
-router.get('/accounts', controllers.accountController.getAll);
-router.put('/accounts/:id', controllers.accountController.update);
-router.delete('/accounts/:id', controllers.accountController.delete);
+router.post('/transports', validate(ctrl.transport.create));
+router.get('/transports', validate(ctrl.transport.getAll));
+router.put('/transports/:id', validate(ctrl.transport.update));
+router.delete('/transports/:id', validate(ctrl.transport.delete));
 
-// PRODUCT MASTER (Image 1)
-router.post('/products', controllers.productController.create);
-router.get('/products', controllers.productController.getAll);
-router.put('/products/:id', controllers.productController.update);
-router.delete('/products/:id', controllers.productController.delete);
+router.post('/tariffs', validate(ctrl.tariff.create));
+router.get('/tariffs', validate(ctrl.tariff.getAll));
+router.put('/tariffs/:id', validate(ctrl.tariff.update));
+router.delete('/tariffs/:id', validate(ctrl.tariff.delete));
 
-// TARIFF SUB HEAD MASTER (Image 2)
-router.post('/tariffs', controllers.tariffController.create);
-router.get('/tariffs', controllers.tariffController.getAll);
-router.put('/tariffs/:id', controllers.tariffController.update);
-router.delete('/tariffs/:id', controllers.tariffController.delete);
+router.post('/packing-types', validate(ctrl.packing.create));
+router.get('/packing-types', validate(ctrl.packing.getAll));
+router.put('/packing-types/:id', validate(ctrl.packing.update));
+router.delete('/packing-types/:id', validate(ctrl.packing.delete));
 
-// TRANSPORT MASTER (Image 3)
-router.post('/transports', controllers.transportController.create);
-router.get('/transports', controllers.transportController.getAll);
-router.put('/transports/:id', controllers.transportController.update);
-router.delete('/transports/:id', controllers.transportController.delete);
+router.post('/invoice-types', validate(ctrl.invoiceType.create));
+router.get('/invoice-types', validate(ctrl.invoiceType.getAll));
+router.put('/invoice-types/:id', validate(ctrl.invoiceType.update));
+router.delete('/invoice-types/:id', validate(ctrl.invoiceType.delete));
 
-// BROKER MASTER (Image 4)
-router.post('/brokers', controllers.brokerController.create);
-router.get('/brokers', controllers.brokerController.getAll);
-router.put('/brokers/:id', controllers.brokerController.update);
-router.delete('/brokers/:id', controllers.brokerController.delete);
+// Transactions
+router.post('/orders', validate(ctrl.order.create));
+router.get('/orders', validate(ctrl.order.getAll));
+router.put('/orders/:id', validate(ctrl.order.update));
+router.delete('/orders/:id', validate(ctrl.order.delete));
 
-// PACKING TYPE MASTER (Image 5)
-router.post('/packing-types', controllers.packingTypeController.create);
-router.get('/packing-types', controllers.packingTypeController.getAll);
-router.put('/packing-types/:id', controllers.packingTypeController.update);
-router.delete('/packing-types/:id', controllers.packingTypeController.delete);
+router.post('/production', validate(ctrl.production.create));
+router.get('/production', validate(ctrl.production.getAll));
+router.put('/production/:id', validate(ctrl.production.update));
+router.delete('/production/:id', validate(ctrl.production.delete));
 
-// INVOICE TYPE MASTER (Image 12)
-router.post('/invoice-types', controllers.invoiceTypeController.create);
-router.get('/invoice-types', controllers.invoiceTypeController.getAll);
-router.put('/invoice-types/:id', controllers.invoiceTypeController.update);
-router.delete('/invoice-types/:id', controllers.invoiceTypeController.delete);
+router.post('/invoices', validate(ctrl.invoice.create));
+router.get('/invoices', validate(ctrl.invoice.getAll));
+router.put('/invoices/approve/:id', validate(ctrl.invoice.approve));
+router.put('/invoices/reject/:id', validate(ctrl.invoice.reject));
+router.put('/invoices/:id', validate(ctrl.invoice.update));
+router.delete('/invoices/:id', validate(ctrl.invoice.delete));
 
-// SPINNING COUNT MASTER (Added for Count dropdown in Image 1)
-// Essential for the "No Static Values" requirement
-router.post('/spinning-counts', controllers.spinningCountController.create);
-router.get('/spinning-counts', controllers.spinningCountController.getAll);
-router.put('/spinning-counts/:id', controllers.spinningCountController.update);
-router.delete('/spinning-counts/:id', controllers.spinningCountController.delete);
+// --- NEW REPORT ROUTES ---
+router.get('/reports/:reportId', validate(ctrl.reports.getReportData));
+router.get('/invoices/print/:id', validate(ctrl.reports.getInvoicePrintData));
 
+router.post('/depot-received', validate(ctrl.depotReceived.create));
+router.get('/depot-received', validate(ctrl.depotReceived.getAll));
+router.put('/depot-received/:id', validate(ctrl.depotReceived.update));
 
-/**
- * ==========================================
- * 2. TRANSACTIONAL ROUTES (Images 6, 9-14)
- * ==========================================
- */
-
-// SALES ORDER / CONFIRMATION (Images 9, 10, 11)
-// Uses specialized transactional logic for Head + Detail Grid
-router.post('/orders', controllers.orderController.create);
-router.get('/orders', controllers.orderController.getAll);
-// Update/Delete for complex orders can be added as needed
-
-// RG1 PRODUCTION (Image 12 - Bottom)
-router.post('/production', controllers.productionController.create);
-router.get('/production', controllers.productionController.getAll);
-router.put('/production/:id', controllers.productionController.update);
-router.delete('/production/:id', controllers.productionController.delete);
-
-// DESPATCH ENTRY (Images 13 & 14)
-router.post('/despatch', controllers.despatchController.create);
-router.get('/despatch', controllers.despatchController.getAll);
-router.put('/despatch/:id', controllers.despatchController.update);
-router.delete('/despatch/:id', controllers.despatchController.delete);
+router.post('/despatch', validate(ctrl.despatch.create));
+router.get('/despatch', validate(ctrl.despatch.getAll));
+router.put('/despatch/:id', validate(ctrl.despatch.update));
 
 module.exports = router;

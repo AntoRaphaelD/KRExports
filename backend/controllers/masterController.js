@@ -1,191 +1,209 @@
 const { 
-  sequelize, 
-  TariffSubHead, 
-  PackingType, 
-  SpinningCount, 
-  Account, 
-  Product, 
-  Broker, 
-  Transport, 
-  InvoiceType, 
-  OrderHeader, 
-  OrderDetail, 
-  RG1Production, 
-  DespatchEntry 
+    sequelize, TariffSubHead, PackingType, Broker, Transport, 
+    Account, Product, OrderHeader, OrderDetail, 
+    RG1Production, DespatchEntry, InvoiceHeader, 
+    InvoiceDetail, DepotReceived, InvoiceType, DepotStock 
 } = require('../models');
 const { Op } = require('sequelize');
 
-/**
- * GENERIC MASTER CONTROLLER FACTORY
- * This handles all standard Master tables (Images 1-5, 7, 8, 12).
- * It supports the "Like" vs "=" search condition seen in your software.
- */
-const createMasterController = (Model, defaultSearchField, includeModels = []) => ({
-  // CREATE
-  create: async (req, res) => {
-    try {
-      const record = await Model.create(req.body);
-      const fullRecord = await Model.findByPk(record.id || record.account_code || record.product_code || record.tariff_code, { 
-        include: includeModels 
-      });
-      res.status(201).json({ success: true, data: fullRecord });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+// 1. Generic Factory
+const createMasterController = (Model, includeModels = []) => ({
+    create: async (req, res) => {
+        try {
+            const data = await Model.create(req.body);
+            res.status(201).json({ success: true, data });
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+    getAll: async (req, res) => {
+        try {
+            const { searchField, searchValue } = req.query;
+            let where = {};
+            if (searchField && searchValue) where[searchField] = { [Op.like]: `%${searchValue}%` };
+            const data = await Model.findAll({ where, include: includeModels });
+            res.status(200).json({ success: true, data });
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+    getOne: async (req, res) => {
+        try {
+            const data = await Model.findByPk(req.params.id, { include: includeModels });
+            if (!data) return res.status(404).json({ success: false, message: "Not found" });
+            res.status(200).json({ success: true, data });
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+    update: async (req, res) => {
+        try {
+            await Model.update(req.body, { where: { id: req.params.id } });
+            res.status(200).json({ success: true });
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    },
+    delete: async (req, res) => {
+        try {
+            await Model.destroy({ where: { id: req.params.id } });
+            res.status(200).json({ success: true });
+        } catch (err) { res.status(500).json({ success: false, error: err.message }); }
     }
-  },
-
-  // GET ALL with Dynamic Search Logic
-  getAll: async (req, res) => {
-    try {
-      const { searchField, value, condition } = req.query;
-      let where = {};
-
-      if (value && value.trim() !== "") {
-        const field = searchField || defaultSearchField;
-        // Implements the logic from the "Condition" dropdown in your UI
-        if (condition === 'Like') {
-          where[field] = { [Op.like]: `%${value}%` };
-        } else {
-          where[field] = value;
-        }
-      }
-
-      const records = await Model.findAll({
-        where,
-        include: includeModels,
-        order: [['createdAt', 'DESC']]
-      });
-      res.status(200).json({ success: true, data: records });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-
-  // UPDATE
-  update: async (req, res) => {
-    try {
-      const id = req.params.id;
-      const record = await Model.findByPk(id);
-      if (!record) return res.status(404).json({ success: false, message: 'Record not found' });
-
-      await record.update(req.body);
-      const updated = await Model.findByPk(id, { include: includeModels });
-      res.status(200).json({ success: true, data: updated });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-
-  // DELETE
-  delete: async (req, res) => {
-    try {
-      const deleted = await Model.destroy({ where: { id: req.params.id } });
-      if (!deleted) return res.status(404).json({ success: false, message: 'Record not found' });
-      res.status(200).json({ success: true, message: 'Deleted successfully' });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  }
 });
 
-/**
- * TRANSACTIONAL CONTROLLER FOR ORDERS (Images 9, 10, 11)
- * Handles "Head" and "Detail" tabs simultaneously using a SQL Transaction.
- */
-const orderController = {
-  create: async (req, res) => {
+// 2. Transactional Controllers
+const orderCtrl = createMasterController(OrderHeader, [{ model: OrderDetail, include: [Product] }, 'Party']);
+orderCtrl.create = async (req, res) => {
     const t = await sequelize.transaction();
     try {
-      const { Details, ...headerData } = req.body;
-      
-      // Create Order Header
-      const order = await OrderHeader.create(headerData, { transaction: t });
-      
-      // Create multiple Order Details (the grid rows)
-      if (Details && Details.length > 0) {
-        const items = Details.map(item => ({ ...item, order_id: order.id }));
-        await OrderDetail.bulkCreate(items, { transaction: t });
-      }
+        const { Details, ...header } = req.body;
+        const order = await OrderHeader.create(header, { transaction: t });
+        if (Details) await OrderDetail.bulkCreate(Details.map(d => ({ ...d, order_id: order.id })), { transaction: t });
+        await t.commit();
+        res.status(201).json({ success: true, data: order });
+    } catch (err) { await t.rollback(); res.status(500).json({ error: err.message }); }
+};
 
-      await t.commit();
-      
-      // Return the full Order with all associated details and product specs
-      const fullOrder = await OrderHeader.findByPk(order.id, {
-        include: [
-          { model: Account, as: 'Party' },
-          { model: Broker, as: 'Broker' },
-          { model: OrderDetail, as: 'Details', include: [{ model: Product, as: 'Product' }] }
-        ]
-      });
-      res.status(201).json({ success: true, data: fullOrder });
-    } catch (error) {
-      await t.rollback();
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-
-  getAll: async (req, res) => {
+const productionCtrl = createMasterController(RG1Production, [Product]);
+productionCtrl.create = async (req, res) => {
+    const t = await sequelize.transaction();
     try {
-      const orders = await OrderHeader.findAll({
-        include: [
-          { model: Account, as: 'Party' },
-          { model: Broker, as: 'Broker' },
-          { model: Transport, as: 'Transport' },
-          { model: OrderDetail, as: 'Details', include: [{ model: Product, as: 'Product' }] }
-        ]
-      });
-      res.status(200).json({ success: true, data: orders });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+        const prod = await RG1Production.create(req.body, { transaction: t });
+        await Product.increment('mill_stock', { by: req.body.production_kgs, where: { id: req.body.product_id }, transaction: t });
+        await t.commit();
+        res.status(201).json({ success: true, data: prod });
+    } catch (err) { await t.rollback(); res.status(500).json({ error: err.message }); }
+};
+
+const invoiceCtrl = createMasterController(InvoiceHeader, ['Party', { model: InvoiceDetail, include: [Product] }]);
+invoiceCtrl.create = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const { Details, ...header } = req.body;
+        const inv = await InvoiceHeader.create(header, { transaction: t });
+        if (Details) {
+            for (const item of Details) {
+                await InvoiceDetail.create({ ...item, invoice_id: inv.id }, { transaction: t });
+                await Product.decrement('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+            }
+        }
+        await t.commit();
+        res.status(201).json({ success: true, data: inv });
+    } catch (err) { await t.rollback(); res.status(500).json({ error: err.message }); }
+};
+
+invoiceCtrl.approve = async (req, res) => {
+    try {
+        await InvoiceHeader.update({ is_approved: true }, { where: { id: req.params.id } });
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+invoiceCtrl.reject = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const invoiceId = req.params.id;
+        const details = await InvoiceDetail.findAll({ where: { invoice_id: invoiceId } });
+        for (const item of details) {
+            await Product.increment('mill_stock', { by: item.total_kgs, where: { id: item.product_id }, transaction: t });
+        }
+        await InvoiceHeader.destroy({ where: { id: invoiceId }, transaction: t });
+        await t.commit();
+        res.json({ success: true, message: "Invoice Rejected & Stock Reverted" });
+    } catch (err) {
+        await t.rollback();
+        res.status(500).json({ error: err.message });
     }
-  }
 };
 
 /**
- * EXPORTING CONTROLLERS MAPPED TO YOUR UI SCREENS
+ * 3. REPORTING LOGIC
  */
+const reportCtrl = {
+    // Fetches data for Day Books, Stock Statements etc.
+    getReportData: async (req, res) => {
+        const { reportId } = req.params;
+        const { start, end } = req.query;
+        let where = {};
+        if (start && end) where.date = { [Op.between]: [start, end] };
+
+        try {
+            let data = [];
+            if (reportId === 's1') { // Sales Day Book
+                data = await InvoiceHeader.findAll({ where, include: ['Party', { model: InvoiceDetail, include: [Product] }] });
+            } else if (reportId === 'st1') { // RG1 Statement
+                data = await RG1Production.findAll({ where, include: [Product] });
+            }
+            res.json({ success: true, data });
+        } catch (err) { res.status(500).json({ error: err.message }); }
+    },
+
+    // Fetches one invoice with all details for the Print Template
+    getInvoicePrintData: async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log("Fetching print data for Invoice No:", id); // Debug Log
+
+        const invoice = await InvoiceHeader.findOne({
+            where: { invoice_no: id },
+            include: [
+                { 
+                    model: Account, 
+                    as: 'Party' // THIS MUST MATCH models/index.js
+                }, 
+                { 
+                    model: Transport 
+                }, 
+                { 
+                    model: InvoiceDetail, 
+                    include: [Product] 
+                }
+            ]
+        });
+
+        if (!invoice) {
+            return res.status(404).json({ success: false, message: "Invoice not found in database" });
+        }
+
+        const details = invoice.InvoiceDetails || [];
+
+        // Formatting with fallbacks to avoid .reduce() crashes
+        const formattedData = {
+            party_name: invoice.Party?.account_name || "N/A",
+            address: invoice.Party?.address || "",
+            gst_no: invoice.Party?.gst_no || "N/A",
+            invoice_no: invoice.invoice_no,
+            date: invoice.date,
+            ebill: invoice.ebill_no || "---",
+            vehicle: invoice.vehicle_no || "---",
+            delivery: invoice.delivery || "---",
+            
+            // Safe Calculations
+            bags: details.reduce((sum, d) => sum + (parseInt(d.packs) || 0), 0),
+            weight: details.reduce((sum, d) => sum + (parseFloat(d.total_kgs) || 0), 0),
+            rate: details.length > 0 ? details[0].rate : 0,
+            product_name: details.length > 0 ? details[0].Product?.product_name : "---",
+            hsn_code: details.length > 0 ? (details[0].Product?.product_code || "---") : "---",
+            
+            total: parseFloat(invoice.assessable_value || 0),
+            grand_total: parseFloat(invoice.final_invoice_value || 0),
+            total_in_words: "" // Add numbering-to-words logic if required
+        };
+
+        res.json({ success: true, data: formattedData });
+    } catch (err) {
+        // CHECK YOUR TERMINAL FOR THIS ERROR MESSAGE
+        console.error("CRITICAL BACKEND ERROR:", err); 
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+};
+
 module.exports = {
-  // Image 1: Product Master
-  productController: createMasterController(Product, 'product_name', [
-    { model: TariffSubHead, as: 'Tariff' },
-    { model: PackingType, as: 'Packing' },
-    { model: SpinningCount, as: 'Count' }
-  ]),
-
-  // Image 2: Tariff Master
-  tariffController: createMasterController(TariffSubHead, 'tariff_name'),
-
-  // Image 3: Transport Master
-  transportController: createMasterController(Transport, 'transport_name'),
-
-  // Image 4: Broker Master
-  brokerController: createMasterController(Broker, 'broker_name'),
-
-  // Image 5: Packing Type Master
-  packingTypeController: createMasterController(PackingType, 'packing_type'),
-
-  // Images 7 & 8: Accounts Master
-  accountController: createMasterController(Account, 'account_name'),
-  // Image 1: Spinning Count Master (Dropdown source)
-  spinningCountController: createMasterController(
-    SpinningCount,
-    'count_name'
-  ),
-
-  // Image 12: Invoice Type Master
-  invoiceTypeController: createMasterController(InvoiceType, 'invoice_type_name'),
-
-  // Image 12 (Bottom): RG1 Production
-  productionController: createMasterController(RG1Production, 'date', [
-    { model: Product, as: 'Product' },
-    { model: PackingType, as: 'Packing' }
-  ]),
-
-  // Images 13 & 14: Despatch Entry
-  despatchController: createMasterController(DespatchEntry, 'load_no', [
-    { model: Transport, as: 'Transport' }
-  ]),
-
-  // Images 9, 10, 11: Order Confirmation (Master-Detail logic)
-  orderController
+    account: createMasterController(Account),
+    broker: createMasterController(Broker),
+    transport: createMasterController(Transport),
+    tariff: createMasterController(TariffSubHead),
+    packing: createMasterController(PackingType),
+    product: createMasterController(Product, [TariffSubHead]),
+    invoiceType: createMasterController(InvoiceType),
+    order: orderCtrl,
+    production: productionCtrl,
+    invoice: invoiceCtrl,
+    depotReceived: createMasterController(DepotReceived, ['Depot']),
+    despatch: createMasterController(DespatchEntry),
+    reports: reportCtrl // Added
 };
